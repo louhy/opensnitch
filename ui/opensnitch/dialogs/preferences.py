@@ -7,6 +7,7 @@ from PyQt5 import QtCore, QtGui, uic, QtWidgets
 
 from config import Config
 from nodes import Nodes
+from database import Database
 
 import ui_pb2
 
@@ -23,6 +24,7 @@ class PreferencesDialog(QtWidgets.QDialog, uic.loadUiType(DIALOG_UI_PATH)[0]):
 
         self._cfg = Config.get()
         self._nodes = Nodes.instance()
+        self._db = Database.instance()
 
         self._notification_callback.connect(self._cb_notification_callback)
         self._notifications_sent = {}
@@ -69,6 +71,7 @@ class PreferencesDialog(QtWidgets.QDialog, uic.loadUiType(DIALOG_UI_PATH)[0]):
         self.comboNodeAddress.currentIndexChanged.connect(self._cb_node_needs_update)
         self.checkInterceptUnknown.clicked.connect(self._cb_node_needs_update)
         self.checkApplyToNodes.clicked.connect(self._cb_node_needs_update)
+        self.comboDBType.currentIndexChanged.connect(self._cb_db_type_changed)
 
         # True when any node option changes
         self._node_needs_update = False
@@ -91,6 +94,11 @@ class PreferencesDialog(QtWidgets.QDialog, uic.loadUiType(DIALOG_UI_PATH)[0]):
         self.spinUITimeout.setValue(int(self._default_timeout))
         self.spinUITimeout.setEnabled(not self._disable_popups)
         self.popupsCheck.setChecked(self._disable_popups)
+
+        self.comboDBType.setCurrentIndex(self._cfg.getInt(self._cfg.DEFAULT_DB_TYPE_KEY))
+        self.lineFileDB.setText(self._cfg.getSettings(self._cfg.DEFAULT_DB_FILE_KEY))
+        if self.comboDBType.currentIndex() != Database.DB_TYPE_MEMORY:
+            self.lineFileDB.setEnabled(True)
 
         self._load_node_settings()
 
@@ -171,6 +179,16 @@ class PreferencesDialog(QtWidgets.QDialog, uic.loadUiType(DIALOG_UI_PATH)[0]):
 
             self._node_needs_update = False
 
+        elif self.tabWidget.currentIndex() == 2:
+            dbtype = self.comboDBType.currentIndex()
+            self._cfg.setSettings(Config.DEFAULT_DB_TYPE_KEY, dbtype)
+            if dbtype == self._db.get_db_file():
+                print("save db type, is equal, exiting")
+                return
+            if self.lineFileDB.text() != "":
+                self._cfg.setSettings(Config.DEFAULT_DB_FILE_KEY, self.lineFileDB.text())
+                self._db.initialize(self.lineFileDB.text())
+
     def _save_node_config(self, notifObject, addr):
         try:
             self._set_status_message(QtCore.QCoreApplication.translate("preferences", "Applying configuration on {0} ...").format(addr))
@@ -213,8 +231,9 @@ class PreferencesDialog(QtWidgets.QDialog, uic.loadUiType(DIALOG_UI_PATH)[0]):
 
             if node_config.get('Server') != None:
                 # skip setting Server Address if we're applying the config to all nodes
-                if self.checkApplyToNodes.isChecked():
-                    print("skipping server address")
+                # every node has its own address, so we can't assign the
+                # address configured to all nodes.
+                if self.checkApplyToNodes.isChecked() == False:
                     node_config['Server']['Address'] = self.comboNodeAddress.currentText()
                 node_config['Server']['LogFile'] = self.comboNodeLogFile.currentText()
             #else:
@@ -256,6 +275,12 @@ class PreferencesDialog(QtWidgets.QDialog, uic.loadUiType(DIALOG_UI_PATH)[0]):
                 self._set_status_error(QtCore.QCoreApplication.translate("preferences", "Error applying configuration: {0}").format(reply.data))
 
             del self._notifications_sent[reply.id]
+
+    def _cb_db_type_changed(self):
+        if self.comboDBType.currentIndex() == Database.DB_TYPE_MEMORY:
+            self.lineFileDB.setEnabled(False)
+        else:
+            self.lineFileDB.setEnabled(True)
 
     def _cb_accept_button_clicked(self):
         self._save_settings()
